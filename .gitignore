@@ -1,57 +1,22 @@
-# Entorno virtual
-venv/
-.venv/
-env/
-
 # Variables de entorno
 .env
 .env.*
-!.env.example
+
+# Entorno virtual
+venv/
+.venv/
+
+# Logs
+logs/
+logs_*/
+*.log
+
+# Claude Code
+.claude/
+
+# VS Code
+.vscode/
 
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Archivos compilados
-*.so
-
-# Distribución
-build/
-dist/
-*.egg-info/
-
-# Logs
-*.log
-
-# SQLite
-db.sqlite3
-db.sqlite3-journal
-
-# Archivos de VS Code
-.vscode/
-
-# Archivos de JetBrains
-.idea/
-
-# Archivos del sistema
-.DS_Store
-Thumbs.db
-
-# Archivos de cobertura
-.coverage
-htmlcov/
-.pytest_cache/
-.mypy_cache/
-
-# Archivos temporales
-*.tmp
-*.bak
-*.swp
-
-# Media y estáticos generados (si corresponde)
-media/
-staticfiles/
-
-# Variables locales
-.local
+*.pyc
