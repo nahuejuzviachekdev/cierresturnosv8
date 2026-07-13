@@ -1,0 +1,84 @@
+[2026-07-13 13:42:43] ============================================================
+[2026-07-13 13:42:43] INICIO ETL v8 - Cierres de Turno
+[2026-07-13 13:42:43] Rango      : 2026-07-11 a 2026-07-11
+[2026-07-13 13:42:43] Estacion   : 4 | BD SQL Server: BunkerPetroValle.Net | Schema PG: petrovalle
+[2026-07-13 13:42:43] Workers    : 5 modulos en paralelo por ID
+[2026-07-13 13:42:43] Inicio     : 2026-07-13 13:42:43
+[2026-07-13 13:42:43] ============================================================
+[2026-07-13 13:42:43] Consultando IDs en SQL Server...
+[2026-07-13 13:42:43] Se encontraron 7 cierres.
+[2026-07-13 13:42:43] IDs guardados en: D:\petrovalle_sistemas\cierresturnosv8\logs_ids\ids_20260713_134243.txt
+[2026-07-13 13:42:43]   [MASTERS] Sincronizando tablas maestras (petrovalle)...
+[2026-07-13 13:42:43]   [MASTERS] estaciones: 1 filas
+[2026-07-13 13:42:43]   [MASTERS] familias_articulos: 117 filas
+[2026-07-13 13:42:43]   [MASTERS] grupos_articulos: 455 filas
+[2026-07-13 13:42:49]   [MASTERS] articulos: 22217 filas
+[2026-07-13 13:42:49]   [MASTERS] cajas: 4 filas
+[2026-07-13 13:42:49]   [MASTERS] WARN empleados: inserci��n o actualizaci��n en la tabla ��empleados�� viola la llave for��nea ��fk_empleados_id_estacion��
+DETAIL:  La llave (id_estacion)=(1) no est�� presente en la tabla ��estaciones��.
+
+[2026-07-13 13:42:49]   [MASTERS] bancos: 91 filas
+[2026-07-13 13:42:53]   [MASTERS] Clientes: 18147 filas
+
+[2026-07-13 13:42:54] --- IdCierreTurno: 436402 | Fecha: 2026-07-11 00:00:49.323000 ---
+[2026-07-13 13:42:54]   [001_EncabezadoCierreTurno] ERROR: inserci��n o actualizaci��n en la tabla ��cierre_turno_encabezado�� viola la llave for��nea ��fk_cte_empleado1��
+DETAIL:  La llave (id_empleado1)=(174) no est�� presente en la tabla ��empleados��.
+
+[2026-07-13 13:42:54]   [003_Listado_EstadoTanques] OK  — 6 filas (cierre_turno_tanques_detalle=3, cierre_turno_tanques_resumen=3)
+[2026-07-13 13:42:54]   [007_Listado_Despachos_T4] OK  — 0 filas (sin datos)
+[2026-07-13 13:42:55]   [008_Listado_Despachos_T5] OK  — 0 filas (sin datos)
+[2026-07-13 13:42:55]   [009_Listado_RecibosEnTurno] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:03]   [002_Listado_EstadoAforadores] OK  — 9 filas (cierre_turno_aforadores_detalle=6, cierre_turno_aforadores_resumen=3)
+[2026-07-13 13:43:03]   [011_Listado_CierresArticulos_F1] OK  — 3 filas (cierre_turno_listado_articulos=3)
+[2026-07-13 13:43:03]   [012_Listado_CierresArticulos_F2] OK  — 3 filas (cierre_turno_listado_articulos_grupos=3)
+[2026-07-13 13:43:03]   [013_Listado_TransferenciasEnTurno] OK  — 3 filas (cierre_turno_transferencias_caja=2, cierre_turno_transferencias_resumen=1)
+[2026-07-13 13:43:03]   [005_Listado_CierresDocumentos_F2] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:04]   [006_Listado_CierresDocumentos_F3] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:04]   [016_Listado_ChequesResumen] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:04]   [010_Listado_DocumentosExentos] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:04]   [018_Listado_CuentaCorriente] OK  — 1 filas (cierre_turno_cuentacorriente_totales=1)
+[2026-07-13 13:43:04]   [015_Listado_TarjetasEnTurno] ERROR: inserción o actualización en la tabla «cierre_turno_listado_tarjetas_lotes» viola la llave foránea «fk_lotes_tarjeta»
+DETAIL:  La llave (id_tarjeta)=(3) no está presente en la tabla «tarjetas_credito».
+
+[2026-07-13 13:43:05]   [014_Listado_ChequesEnTurno] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:05]   [020_DocumentosSinImputacion] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:08]   [017_Listado_ValoresEnTurno] OK  — 1 filas (cierre_turno_valores_resumen=1)
+[2026-07-13 13:43:08]   [019_Listado_ResumenTurno] ERROR: inserci��n o actualizaci��n en la tabla ��cierre_turno_resumen_grupos�� viola la llave for��nea ��fk_cierre_turno_resumen_grup_id_grupo��
+DETAIL:  La llave (id_grupo_articulo)=(-1) no est�� presente en la tabla ��grupos_articulos��.
+
+[2026-07-13 13:43:09]   [004_Listado_CierresDocumentos_F1] ERROR: inserción o actualización en la tabla «cierre_turno_listado_documentos_cabecera» viola la llave foránea «fk_cierre_turno_listado_documentos_cabecera_tipomov»
+DETAIL:  La llave (id_tipo_movimiento)=(FAA) no está presente en la tabla «tipos_movimientos».
+
+[2026-07-13 13:43:09]   [021_FacturaPendiente] OK  — 1 filas (petrovalle.facturas_pendientes=1)
+[2026-07-13 13:43:09]   Modulos: 17 OK, 4 con error | Duracion: 15.8s
+
+[2026-07-13 13:43:09] --- IdCierreTurno: 436421 | Fecha: 2026-07-11 05:50:29.430000 ---
+[2026-07-13 13:43:10]   [001_EncabezadoCierreTurno] ERROR: inserci��n o actualizaci��n en la tabla ��cierre_turno_encabezado�� viola la llave for��nea ��fk_cte_empleado1��
+DETAIL:  La llave (id_empleado1)=(174) no est�� presente en la tabla ��empleados��.
+
+[2026-07-13 13:43:11]   [003_Listado_EstadoTanques] OK  — 6 filas (cierre_turno_tanques_detalle=3, cierre_turno_tanques_resumen=3)
+[2026-07-13 13:43:11]   [007_Listado_Despachos_T4] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:11]   [008_Listado_Despachos_T5] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:12]   [009_Listado_RecibosEnTurno] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:14]   [002_Listado_EstadoAforadores] OK  — 9 filas (cierre_turno_aforadores_detalle=6, cierre_turno_aforadores_resumen=3)
+[2026-07-13 13:43:14]   [011_Listado_CierresArticulos_F1] OK  — 3 filas (cierre_turno_listado_articulos=3)
+[2026-07-13 13:43:14]   [012_Listado_CierresArticulos_F2] OK  — 3 filas (cierre_turno_listado_articulos_grupos=3)
+[2026-07-13 13:43:14]   [013_Listado_TransferenciasEnTurno] OK  — 3 filas (cierre_turno_transferencias_caja=2, cierre_turno_transferencias_resumen=1)
+[2026-07-13 13:43:15]   [014_Listado_ChequesEnTurno] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:16]   [015_Listado_TarjetasEnTurno] ERROR: inserción o actualización en la tabla «cierre_turno_listado_tarjetas_lotes» viola la llave foránea «fk_lotes_tarjeta»
+DETAIL:  La llave (id_tarjeta)=(31) no está presente en la tabla «tarjetas_credito».
+
+[2026-07-13 13:43:16]   [016_Listado_ChequesResumen] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:20]   [017_Listado_ValoresEnTurno] OK  — 1 filas (cierre_turno_valores_resumen=1)
+[2026-07-13 13:43:20]   [018_Listado_CuentaCorriente] OK  — 1 filas (cierre_turno_cuentacorriente_totales=1)
+[2026-07-13 13:43:23]   [019_Listado_ResumenTurno] ERROR: inserci��n o actualizaci��n en la tabla ��cierre_turno_resumen_grupos�� viola la llave for��nea ��fk_cierre_turno_resumen_grup_id_grupo��
+DETAIL:  La llave (id_grupo_articulo)=(-1) no est�� presente en la tabla ��grupos_articulos��.
+
+[2026-07-13 13:43:23]   [004_Listado_CierresDocumentos_F1] ERROR: inserción o actualización en la tabla «cierre_turno_listado_documentos_cabecera» viola la llave foránea «fk_cierre_turno_listado_documentos_cabecera_tipomov»
+DETAIL:  La llave (id_tipo_movimiento)=(FAA) no está presente en la tabla «tipos_movimientos».
+
+[2026-07-13 13:43:23]   [020_DocumentosSinImputacion] OK  — 0 filas (sin datos)
+[2026-07-13 13:43:24]   [006_Listado_CierresDocumentos_F3] ERROR: inserción o actualización en la tabla «cierre_turno_listado_documentos» viola la llave foránea «fk_cierre_turno_listado_documentos_tipomov»
+DETAIL:  La llave (id_tipo_movimiento)=(REM) no está presente en la tabla «tipos_movimientos».
+
+[2026-07-13 13:43:28]   [021_FacturaPendiente] OK  — 1 filas (petrovalle.facturas_pendientes=1)

@@ -1,0 +1,537 @@
+-- CONSULTAS PARA REPLICAR REPORTE: PlanillaDeCierreDeTurno (ID: 423749)
+-- ---------------------------------------------------------------------------------------
+
+-- 1. ENCABEZADO Y EMPLEADOS
+SELECT 
+    id_cierre_turno as "IdCierreTurno",
+	fecha as  "fecha",
+	descripcion as "caja",
+    	empleado1 as encargado,
+    	empleado2 as vendedor_2,
+    	empleado3 as vendedor_3,
+    	empleado4 as vendedor_4,
+    	empleado5 as vendedor_5,
+	empleado6 as vendedor_6,
+	empleado7 as vendedor_7,
+	empleado8 as vendedor_8,
+	empleado9 as vendedor_9
+FROM cierre_turno_encabezado
+WHERE id_cierre_turno = 424238;
+
+a)-- Detalle de empleados estilo fiscal
+SELECT empleado 
+FROM cierre_turno_empleados_fiscal 
+WHERE id_cierre_turno = 423749;
+
+
+-- 2. NUMERACIÓN DE COMPROBANTES EN EL TURNO
+SELECT 
+    descripcion_tipo_mov as "Descripción",
+    id_tipo_movimiento as "Tipo",
+    LPAD(punto_venta::text, 4, '0') as "Prefijo",
+    numero_minimo_cadena as "Mínimo",
+    numero_maximo_cadena as "Máximo",
+    importe as "Importe",
+    percepciones as "Percepciones",
+    num_operaciones as "Núm. movim."
+FROM cierre_turno_documentos
+WHERE id_cierre_turno = 423749
+ORDER BY id_tipo_movimiento, punto_venta;
+
+
+-- 3. ESTADO DE AFORADORES
+SELECT 
+    descripcion_articulo as "Artículo",
+    manguera as "Pico/cara",
+    anterior_mecanico as "Ant. Mecánico",
+    anterior_electronico as "Ant. Electrónico",
+    litros_prueba as "Pruebas",
+    aforador_mecanico as "Act. Mecánico",
+    aforador_electronico as "Act. Electrónico",
+    despachado as "Litros Despachados",
+    unidades as "Unidad",
+    importe_teorico as "Importe Teórico"
+FROM cierre_turno_aforadores_detalle
+WHERE id_cierre_turno = 423749
+ORDER BY numero_manguera;
+
+
+-- 4. RESUMEN POR COMBUSTIBLE (UNIDADES E IMPORTE)
+SELECT 
+    descripcion_articulo as "Artículo",
+    precio as "Precio Cartel",
+    despachado as "Despachos cantidad",	
+    importe_despachado as "Despachos Importe",
+	remitos_contado as "Comprobantes Remitos Contado",
+	remitos_cuenta_corriente as "Comprobantes Remitos Cta Cte",
+	especiales_cuenta_corriente as "Comprobantes Remitos Especiales",
+	facturas_contado as "Comprobantes Facturas Contado",
+	facturas_cuenta_corriente as "Comprobantes Facturas cta cte",
+	en_comprobantes as "Total",
+	diferencia
+FROM cierre_turno_aforadores_resumen
+WHERE id_cierre_turno = 423749
+ORDER BY despachado desc;
+
+
+-- 5. ESTADO DE TANQUES
+SELECT 
+	numero_tanque as "Tanque",
+    descripcion_articulo as "Artículo",
+    capacidad as "Capacidad",
+    stock_anterior as "Stk. Anterior",
+    descarga as "Descarga Cantidad",
+    vendido as "Despachos Cantidad",
+    stock_actual as "Stock Actual",
+	vacio as "(Vacio)*",
+	medicion as "medicion",
+	diferencia as "litros",
+	porcentaje_diferencia as "(%)"
+FROM cierre_turno_tanques_detalle
+WHERE id_cierre_turno = 423749
+ORDER BY numero_tanque;
+
+
+-- 6. RESUMEN POR COMBUSTIBLE - STOCK Y VACÍO
+SELECT 
+    descripcion_articulo as "Artículo",
+    stock_anterior as "Stk. Anterior",
+    descarga as "Descarga",
+    despachos as "Vendido",
+    stock_actual as "Stk. Actual",
+    vacio_actual as "Vacío",
+    venta_promedio as "Venta Promedio",
+    vacio24 as "V. 24h",
+    vacio48 as "V. 48h",
+    vacio72 as "V. 72h"
+FROM cierre_turno_tanques_resumen
+WHERE id_cierre_turno = 423749
+ORDER BY descripcion_articulo;
+
+
+-- 7. DOCUMENTOS DE CONTADO EN TURNO
+SELECT 
+    comp as "Comprobante",
+    numero_documento as "Número",
+    razon_social as "Razón Social/Cuenta corriente",
+    percepciones as "Percepciones",
+    total as "Importe"
+FROM cierre_turno_listado_documentos_cabecera
+WHERE id_cierre_turno = 423749 
+  AND es_cuenta_corriente = FALSE 
+  AND es_remito = FALSE;
+
+-- 8. REMITOS DE CUENTA CORRIENTE EN TURNO          
+SELECT
+    fecha as "fecha",
+    comprobante as "Comprobante",
+    razon_social as "Razón Social",
+    percepciones as "Percepciones",
+    total as "Importe"
+FROM cierre_turno_listado_documentos_detalles
+WHERE id_cierre_turno = 423749 
+  AND id_tipo_movimiento = 'REM'
+ORDER BY numero_documento;
+
+-- 9. ARTÍCULOS FACTURADOS EN EL TURNO
+SELECT 
+	familia,
+    descripcion_grupo as "Grupo de Articulos",
+    codigo as "Código",
+    descripcion_articulo as "Descripción",
+    cantidad as "Cantidad",
+    importe
+FROM cierre_turno_listado_articulos
+WHERE id_cierre_turno = 423749;
+
+
+-- 10. GRUPO DE ARTICULOS FACTURADOS EN TURNO 
+SELECT 
+    descripcion_grupo as "Agrupacion",
+    cantidad as "Cantidad",
+    importe
+FROM cierre_turno_listado_articulos
+WHERE id_cierre_turno = 423749;
+
+
+-- 11. DETALLE DE TRANSFERENCIA DE VALORES EN TURNO 
+SELECT
+	TO_CHAR(fecha, 'HH24:MI') AS hora,      
+	comprobante,                             
+	descripcion,                            
+	efectivo,                                
+	cheques AS cheques,                
+    importe AS total                    
+FROM
+	cierre_turno_transferencias_caja
+WHERE
+	id_cierre_turno = 423749                
+ORDER BY fecha ASC;  
+
+
+-- 12. CUPONES INGRESADOS
+SELECT 
+	fecha,
+    nombre as "Tarjeta",
+    numero,
+    razon_social as "Razon Social",
+    importe as "Importe",
+	retiro_efectivo as "Retiro",
+	involucrado as "Involucrado en el turno",
+	documento as "Documento relacionado"
+FROM cierre_turno_listado_tarjetas_cupones
+WHERE id_cierre_turno = 423749 ORDER BY fecha asc;
+
+
+-- 13. LOTES INGRESADOS
+SELECT 
+	fecha as "Fehca",
+    nombre as "Tarjeta",
+	comprobante as "Comprobante",
+    importe as "Importe",
+	involucrado as "Involucrado"
+FROM cierre_turno_listado_tarjetas_lotes
+WHERE id_cierre_turno = 423749
+ORDER BY nombre;
+
+
+
+-- 14. LISTADO DE OTROS INGRESOS 
+SELECT 
+    otros_ingresos as "Importe"
+FROM cierre_turno_valores_resumen
+WHERE id_cierre_turno = 423749;
+
+
+
+
+-- 15. VALORES EN EL TURNO 
+WITH totales AS (
+    SELECT *
+    FROM cierre_turno_resumen_totales
+    WHERE id_cierre_turno = 424510
+),
+resumen_valores AS (
+    SELECT *
+    FROM cierre_turno_valores_resumen
+    WHERE id_cierre_turno = 424510
+),
+dif AS (
+    SELECT *
+    FROM cierre_turno_resumen_diferencias
+    WHERE id_cierre_turno = 424510
+)
+
+SELECT
+    'Cambio del turno anterior:' AS "Concepto",
+    cambio_turno_anterior AS "Importe"
+FROM totales
+
+UNION ALL
+SELECT
+    'Efectivo total declarado:',
+    efectivo
+FROM totales
+
+UNION ALL
+SELECT
+    'Cambio para el turno siguiente:',
+    cambio_para_turno_siguiente
+FROM totales
+
+UNION ALL
+SELECT
+    'Cheques:',
+    cheques_sin_transferir
+FROM totales
+
+UNION ALL
+SELECT
+    'Tarjetas:',
+    tarjetas_en_turno
+FROM totales
+
+UNION ALL
+SELECT
+    'Pagos/gastos:',
+    pagos_gastos_en_turno
+FROM totales
+
+UNION ALL
+SELECT
+    'Vales para clientes/empleados:',
+    vales_en_turno
+FROM cierre_turno_valores_resumen 
+WHERE id_cierre_turno = 424510
+
+UNION ALL
+SELECT
+    'Otros ingresos:',
+    otros_ingresos
+FROM totales
+
+UNION ALL
+SELECT
+    'Bonos entregados:',
+    bonos_entregados
+FROM totales
+
+UNION ALL
+SELECT
+    'Bonos/vales recuperados:',
+    bonos_recuperados
+FROM totales
+
+UNION ALL
+SELECT
+    'Transferencias recibidas:',
+    transferencias_ingresos
+FROM totales
+
+UNION ALL
+SELECT
+    '  Desde caja de tesorería:',
+    transferencias_ingresos_efectivo
+FROM totales
+
+UNION ALL
+SELECT
+    '  Vueltos de dispenser:',
+    (
+        SELECT COALESCE(
+            SUM(transf_ingr_efectivo_dispenser::numeric),
+            0.00
+        )
+        FROM resumen_valores
+    )
+
+UNION ALL
+SELECT
+    'Transferencias realizadas:',
+    transferencias_egresos
+FROM totales
+
+UNION ALL
+SELECT
+    '  Hacia caja de tesorería:',
+    transferencias_egresos_efectivo
+FROM totales
+
+UNION ALL
+SELECT
+    '  Pagos en dispenser:',
+    (
+        SELECT COALESCE(
+            SUM(transf_egr_efectivo_dispenser::numeric),
+            0.00
+        )
+        FROM resumen_valores
+    )
+
+UNION ALL
+SELECT
+    '  Hacia empresa recaudadora:',
+    (
+        SELECT COALESCE(
+            SUM(transf_egr_empresa_recaudadora::numeric),
+            0.00
+        )
+        FROM resumen_valores
+    )
+
+UNION ALL
+SELECT
+    'Total declarado:',
+    total_declarado
+FROM totales
+
+UNION ALL
+SELECT
+    'Total de ventas cobradas:',
+     ventas_cobradas
+FROM resumen_valores;
+
+
+
+
+-- 16. RESUMEN DEL TURNO 
+
+a).  Movimientos en cuenta corriente 
+SELECT
+    total_cuenta_corriente AS "Facturas",
+    total_remitos_cuenta_corriente AS "Remitos"
+FROM
+    cierre_turno_cuentacorriente_totales
+WHERE
+    id_cierre_turno = 423749; 
+
+b). Ventas de contado calculadas por sistema (Cabecera)
+ SELECT
+     recibos_en_turno AS "Cobranzas",
+     facturas_de_contado AS "Facturas"
+ FROM
+     cierre_turno_resumen_contado
+ WHERE
+     id_cierre_turno = 423749;
+
+
+c). Ventas de contado calculadas por sistema (Tabla)
+SELECT
+    cantidad AS "Unidades",
+    importe AS "Importe",
+    descripcion_grupo AS "Grupos de artículos"
+FROM cierre_turno_resumen_grupos
+WHERE id_cierre_turno = 423749
+UNION ALL
+SELECT
+    NULL AS "Unidades",
+    COALESCE(SUM(percepciones), 0.00) AS "Importe",
+    'PERCEPCIONES (CONTADO)' AS "Grupos de artículos"
+FROM cierre_turno_documentos
+WHERE id_cierre_turno = 423749
+  AND id_tipo_movimiento NOT IN ('REC', 'LCC', 'REM')
+UNION ALL
+SELECT
+    NULL AS "Unidades",
+    COALESCE(SUM(percepciones), 0.00) AS "Importe",
+    'PERCEPCIONES (CTA.CTE)' AS "Grupos de artículos"
+FROM cierre_turno_documentos
+WHERE id_cierre_turno = 423749
+  AND id_tipo_movimiento IN ('REC', 'LCC', 'REM');
+
+
+d). Valores declarados (Completo Encabezado y tabla)
+WITH totales AS (
+    SELECT *
+    FROM cierre_turno_resumen_totales
+    WHERE id_cierre_turno = 423749
+),
+dif AS (
+    SELECT *
+    FROM cierre_turno_resumen_diferencias
+    WHERE id_cierre_turno = 423749
+)
+
+-- Encabezado de la sección
+SELECT 'TOTAL DECLARADO:' AS "Categoría",
+       'Total' AS "Concepto",
+       total_declarado AS "Importe"
+FROM totales
+
+UNION ALL
+
+-- Sección de INGRESOS
+SELECT 'INGRESOS',
+       'Cambio:',
+       cambio_turno_anterior
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Efectivo:',
+       efectivo
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Transferencias:',
+       transferencias_ingresos
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Cheques:',
+       cheques_sin_transferir
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Tarjetas:',
+       tarjetas_en_turno
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Bonos/Vales:',
+       bonos_recuperados
+FROM totales
+
+UNION ALL
+SELECT 'INGRESOS',
+       'Otros ingresos:',
+       otros_ingresos
+FROM totales
+
+UNION ALL
+
+-- Sección de EGRESOS
+SELECT 'EGRESOS',
+       'Cambio:',
+       cambio_para_turno_siguiente
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       'Vales:',
+       vales
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       '  Vales empleados:',
+       vales_empleados
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       '  Vales clientes:',
+       vales_clientes
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       'Transferencias:',
+       transferencias_egresos
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       'Pagos y gastos:',
+       pagos_gastos_en_turno
+FROM totales
+
+UNION ALL
+SELECT 'EGRESOS',
+       'Bonos/Vales:',
+       bonos_entregados
+FROM totales;
+
+
+17) Diferencias      (CORREGIR)
+WITH diferencia_teorica AS (
+    SELECT diferencia
+    FROM cierre_turno_resumen_diferencias
+    WHERE id_cierre_turno = 424510
+),
+factura_pendiente AS (
+    SELECT SUM(diferencia * precio) AS importe
+    FROM cierre_turno_aforadores_resumen
+    WHERE id_cierre_turno = 424510
+)
+SELECT
+    'Diferencia teórica:' AS "Concepto",
+    dt.diferencia AS "Importe"
+FROM diferencia_teorica dt
+UNION ALL
+SELECT
+    'Factura pendiente:',
+    fp.importe
+FROM factura_pendiente fp
+UNION ALL
+SELECT
+    'Diferencia real:',
+    fp.importe - dt.diferencia
+FROM diferencia_teorica dt, factura_pendiente fp;
+
+
+

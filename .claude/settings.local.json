@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && cat \"{}\"')",
+      "Bash(psql -h localhost -U postgres -d calden_cierresturnos_v5 -c ' *)",
+      "Bash('/c/Program Files/PostgreSQL/18/bin/psql.exe' -h localhost -U postgres -d calden_cierresturnos_v5 -c ' *)",
+      "Bash(PGPASSWORD=nahuel \"/c/Program Files/PostgreSQL/18/bin/psql.exe\" -h localhost -U postgres -l)",
+      "Bash('/c/Program Files/PostgreSQL/18/bin/psql.exe' -h localhost -U postgres -d calden_cierresturnos -c ' *)",
+      "Bash(ls /c/Python*)",
+      "Read(//c/Users/USUARIO/AppData/Local/Programs/Python//**)",
+      "Bash(/c/Python314/python.exe -c ' *)",
+      "Bash(psql -h localhost -U postgres -d calden_cierresturnos -c \"\\\\dt public.*\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
