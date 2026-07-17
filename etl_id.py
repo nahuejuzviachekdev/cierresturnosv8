@@ -443,15 +443,22 @@ def sync_table(pg_conn, table_name, col_names, col_types, rows,
             m   = _pat.match(val)
             row.append(int(m.group(1)) if m else None)
 
-    # 2b. id_caja desde descripcion_caja via lookup en tabla cajas
+    # 2b. id_caja desde descripcion_caja: primero intenta el patron "(NNN)- ..."
+    #     (formato real del SP Listado_EstadoTanques); si no matchea, cae a
+    #     lookup por nombre exacto en tabla cajas como fallback.
     if derive_caja_from == 'descripcion_caja' and 'descripcion_caja' in pg_cols:
         src_idx  = pg_cols.index('descripcion_caja')
         lkp      = _get_cajas_lkp(pg_conn)
         pg_cols.append('id_caja')
         types_mut.append(int)
+        _pat = re.compile(r'^\((\d+)\s*\)')
         for row in data_rows:
-            key = str(row[src_idx] or '').strip().upper()
-            row.append(lkp.get(key))
+            val = str(row[src_idx] or '').strip()
+            m   = _pat.match(val)
+            if m:
+                row.append(int(m.group(1)))
+            else:
+                row.append(lkp.get(val.upper()))
 
     # 2c. id_banco desde nombre_banco via lookup en tabla bancos
     if derive_banco_from == 'nombre_banco' and 'nombre_banco' in pg_cols:

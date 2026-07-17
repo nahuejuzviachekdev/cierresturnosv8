@@ -549,7 +549,8 @@ def sync_table(pg_conn, schema, table_name, col_names, col_types, rows,
 
     derive_caja_from : snake_case de la columna fuente para derivar id_caja.
         'descripcion'      → extrae id de '(123)- NOMBRE' con regex.
-        'descripcion_caja' → lookup por nombre en tabla cajas.
+        'descripcion_caja' → extrae id de '(123)- NOMBRE' con regex; si no matchea,
+                              cae a lookup por nombre exacto en tabla cajas.
     derive_banco_from : snake_case de la columna fuente para derivar id_banco.
         'nombre_banco'     → lookup por nombre en tabla bancos.
     """
@@ -577,11 +578,17 @@ def sync_table(pg_conn, schema, table_name, col_names, col_types, rows,
                 m   = re.match(r'^\((\d+)\s*\)', val)
                 row.append(int(m.group(1)) if m else None)
         else:
-            # Lookup por descripción literal en tabla cajas
+            # 'descripcion_caja': primero intenta el patron "(NNN)- ..." (formato
+            # real del SP Listado_EstadoTanques); si no matchea, cae a lookup
+            # por nombre exacto en tabla cajas como fallback.
             lkp = _get_cajas_lkp(pg_conn, schema)
             for row in rows:
-                key = str(row[src_idx] or '').strip().upper()
-                row.append(lkp.get(key))
+                val = str(row[src_idx] or '').strip()
+                m   = re.match(r'^\((\d+)\s*\)', val)
+                if m:
+                    row.append(int(m.group(1)))
+                else:
+                    row.append(lkp.get(val.upper()))
         pg_cols.append('id_caja')
         columns_final.append('id_caja')
         types_final.append(int)
