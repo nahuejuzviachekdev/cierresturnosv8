@@ -1,5 +1,15 @@
 @echo off
 chcp 65001 > nul
+
+:: Preferir el Python del sistema; si no esta instalado, usar el portable (PYTHON_PATH en .env)
+set "PYTHON_EXE=python"
+where python >nul 2>nul
+if not %errorlevel%==0 (
+    for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0.env") do (
+        if "%%a"=="PYTHON_PATH" set "PYTHON_EXE=%%b"
+    )
+)
+
 echo =============================================
 echo  Factura Pendiente por Rango de Fechas
 echo =============================================
@@ -16,5 +26,5 @@ if "%~2"=="" (
     set FECHA_HASTA=%~2
 )
 
-python factura_pendiente_rango.py %FECHA_DESDE% %FECHA_HASTA%
+"%PYTHON_EXE%" factura_pendiente_rango.py %FECHA_DESDE% %FECHA_HASTA%
 pause

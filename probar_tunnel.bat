@@ -10,5 +10,5 @@ if not %errorlevel%==0 (
     )
 )
 
-"%PYTHON_EXE%" contar_bd.py
+"%PYTHON_EXE%" probar_tunnel.py
 pause

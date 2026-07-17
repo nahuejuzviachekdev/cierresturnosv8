@@ -1,18 +1,10 @@
 import os
-import psycopg2
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+import pg_tunnel
 
-DB_CONFIG = {
-    "host":            os.getenv("HOST"),
-    "port":            os.getenv("PORT_1"),
-    "dbname":          os.getenv("DATABASE"),
-    "user":            os.getenv("USERNAME"),
-    "password":        os.getenv("PASSWORD"),
-    "options":         "-c client_encoding=UTF8",
-}
+load_dotenv(override=True)
 
 SCHEMAS = [
     os.getenv("SCHEMA"),
@@ -50,11 +42,13 @@ def main():
     lineas = []
     lineas.append("=" * 60)
     lineas.append(f"  CONTEO DE REGISTROS - {ahora.strftime('%d/%m/%Y %H:%M:%S')}")
-    lineas.append(f"  Base de datos: {DB_CONFIG['dbname']} ({DB_CONFIG['host']}:{DB_CONFIG['port']})")
+    lineas.append(f"  Base de datos: {os.getenv('DATABASE')} (via tunel SSH)")
     lineas.append("=" * 60)
 
+    pg_tunnel.configurar_logging(lineas.append)
+
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = pg_tunnel.conectar_pg()
         cur = conn.cursor()
 
         for schema in SCHEMAS:
@@ -89,6 +83,8 @@ def main():
 
     except Exception as e:
         lineas.append(f"\nERROR DE CONEXION: {e}")
+
+    pg_tunnel.cerrar_tunel()
 
     lineas.append("\n" + "=" * 60)
 

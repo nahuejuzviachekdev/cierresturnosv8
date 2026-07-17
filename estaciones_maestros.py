@@ -17,6 +17,8 @@ import pyodbc
 import psycopg2
 from psycopg2 import extras
 
+import pg_tunnel
+
 # ---------------------------------------------------------------------------
 # Cargar .env
 # ---------------------------------------------------------------------------
@@ -32,11 +34,6 @@ if os.path.exists(_ENV_PATH):
 # ---------------------------------------------------------------------------
 # Configuracion
 # ---------------------------------------------------------------------------
-PG_HOST = os.getenv('HOST')
-PG_DB   = os.getenv('DATABASE')
-PG_USER = os.getenv('USERNAME')
-PG_PASS = os.getenv('PASSWORD')
-PG_PORT = os.getenv('PORT_1', '5432')
 
 SQL_HOST = os.getenv('SQLSERVER_HOST_1')
 SQL_USER = os.getenv('SQLSERVER_USER_1')
@@ -105,10 +102,7 @@ def _connect_sql(db):
     return conn
 
 def _connect_pg():
-    return psycopg2.connect(
-        host=PG_HOST, database=PG_DB, user=PG_USER,
-        password=PG_PASS, port=PG_PORT
-    )
+    return pg_tunnel.conectar_pg()
 
 def _init_schemas(pg_conn):
     cur = pg_conn.cursor()
@@ -215,6 +209,7 @@ def main():
     stamp     = ts_inicio.strftime('%Y%m%d_%H%M%S')
     log_path  = os.path.join(LOGS_EXEC_DIR, f'estaciones_maestros_{stamp}.txt')
     logger    = Logger(log_path)
+    pg_tunnel.configurar_logging(logger.log)
 
     logger.log('=' * 60)
     logger.log('Estaciones Maestros -- Proceso 027')
@@ -223,6 +218,7 @@ def main():
 
     if not SQL_DB or not SCHEMA:
         logger.log('Variables SQLSERVER_DB/SCHEMA no configuradas en .env.')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
 
@@ -266,6 +262,7 @@ def main():
     logger.log('=' * 60)
     logger.log(f'Fin. Duracion: {duracion:.1f}s | Errores: {errores}')
     logger.log('=' * 60)
+    pg_tunnel.cerrar_tunel()
     logger.close()
 
     sys.exit(0 if errores == 0 else 1)

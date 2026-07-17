@@ -29,16 +29,21 @@ if os.path.exists(_ENV_PATH):
                 _k, _v = _line.split('=', 1)
                 os.environ[_k.strip()] = _v.strip()
 
+import pg_tunnel
+
 # ---------------------------------------------------------------------------
 # Argumentos
 # ---------------------------------------------------------------------------
-if len(sys.argv) < 3:
+MODO_INCREMENTAL = len(sys.argv) >= 2 and sys.argv[1] == '--incremental'
+
+if not MODO_INCREMENTAL and len(sys.argv) < 3:
     print("Uso: python etl.py <fecha_desde> <fecha_hasta>")
+    print("     python etl.py --incremental")
     print("  Ejemplo: python etl.py 2026-03-01 2026-03-31")
     sys.exit(1)
 
-FECHA_DESDE = sys.argv[1]
-FECHA_HASTA = sys.argv[2]
+FECHA_DESDE = None if MODO_INCREMENTAL else sys.argv[1]
+FECHA_HASTA = None if MODO_INCREMENTAL else sys.argv[2]
 
 # Módulos en paralelo por ID de cierre
 MAX_WORKERS = 5
@@ -46,11 +51,6 @@ MAX_WORKERS = 5
 # ---------------------------------------------------------------------------
 # Configuración PostgreSQL (única BD, un solo schema — la estación de este .env)
 # ---------------------------------------------------------------------------
-PG_HOST = os.getenv('HOST')
-PG_DB   = os.getenv('DATABASE')
-PG_USER = os.getenv('USERNAME')
-PG_PASS = os.getenv('PASSWORD')
-PG_PORT = os.getenv('PORT_1', '5432')
 
 SCHEMA = os.getenv('SCHEMA')
 
@@ -140,15 +140,7 @@ def _connect_sql(db):
     return conn
 
 def _connect_pg(schema):
-    conn = psycopg2.connect(
-        host=PG_HOST, database=PG_DB, user=PG_USER,
-        password=PG_PASS, port=PG_PORT
-    )
-    cur = conn.cursor()
-    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {schema}')
-    conn.commit()
-    cur.close()
-    return conn
+    return pg_tunnel.conectar_pg(schema)
 
 # ---------------------------------------------------------------------------
 # Mapeo de tipos pyodbc → PostgreSQL (basado en tipo real de SQL Server)
@@ -391,6 +383,8 @@ _MASTER_TABLES = [
     ('Empleados',          'empleados',          'id_empleado',         False),
     ('Bancos',             'bancos',             'id_banco',            False),
     ('Clientes',           'Clientes',           'IdCliente',           True),
+    ('TiposMovimiento',    'tipos_movimientos',  'id_tipo_movimiento',  False),
+    ('TarjetasCredito',    'tarjetas_credito',   'id_tarjeta',         False),
 ]
 
 
@@ -430,6 +424,26 @@ def _sync_master_table(sql_conn, pg_conn, schema, sql_table, pg_table, pk_col, p
         return f'"{name}"' if preserve_case else name
 
     full_table = f'{schema}."{pg_table}"' if preserve_case else f'{schema}.{pg_table}'
+
+    # DDL: crear tabla si no existe (necesario para tablas nuevas como tipos_movimiento)
+    if not pg_existing:
+        col_defs = []
+        for col, r in zip(sql_cols, rows_raw[0]):
+            pg_type = get_pg_type(type(r[sql_cols_raw.index(col)] if col in sql_cols_raw else str))
+            inline_pk = ' PRIMARY KEY' if col == pk_col else ''
+            col_defs.append(f'{q(col)} {pg_type}{inline_pk}')
+        ddl = f'CREATE TABLE IF NOT EXISTS {full_table} ({", ".join(col_defs)})'
+        cur_ddl = pg_conn.cursor()
+        try:
+            cur_ddl.execute(ddl)
+            pg_conn.commit()
+            # Actualizar cache
+            _pg_cols_cache[f'{schema}.{pg_table}'] = set(sql_cols)
+        except Exception:
+            pg_conn.rollback()
+        finally:
+            cur_ddl.close()
+
     non_pk     = [c for c in sql_cols if c != pk_col]
     cols_str   = ', '.join(q(c) for c in sql_cols)
     if non_pk:
@@ -463,9 +477,59 @@ def sync_all_masters(sql_conn, pg_conn, schema, logger):
             logger.log(f'  [MASTERS] {pg_table}: {n} filas')
         except Exception as e:
             logger.log(f'  [MASTERS] WARN {pg_table}: {e}')
+    # Insertar registros dummy en grupos_articulos para percepciones (IDs sintéticos)
+    _ensure_grupos_sinteticos(pg_conn, schema, logger)
     # Invalidar caches de lookup para usar datos frescos del sync
     _cajas_lkp_cache.pop(schema, None)
     _bancos_lkp_cache.pop(schema, None)
+
+
+def _ensure_grupos_sinteticos(pg_conn, schema, logger):
+    """Asegura la existencia de la tabla grupos_articulos y de los IDs
+    sintéticos (-1, -2) que los SPs de SQL Server generan hardcodeados
+    para percepciones. Seguro para base de datos limpia."""
+    dummy_grupos = [
+        (-1, 'PERCEPCIONES (CONTADO)'),
+        (-2, 'PERCEPCIONES (CTA.CTE.)'),
+    ]
+    cur = pg_conn.cursor()
+    try:
+        # Crear la tabla si no existe (base limpia)
+        cur.execute(f'''
+            CREATE TABLE IF NOT EXISTS {schema}.grupos_articulos (
+                id_grupo_articulo BIGINT PRIMARY KEY,
+                descripcion TEXT
+            )
+        ''')
+        pg_conn.commit()
+
+        # Verificar qué registros faltan
+        cur.execute(
+            f'SELECT id_grupo_articulo FROM {schema}.grupos_articulos '
+            f'WHERE id_grupo_articulo IN (-1, -2)'
+        )
+        existentes = {r[0] for r in cur.fetchall()}
+
+        insertados = 0
+        for gid, gdesc in dummy_grupos:
+            if gid not in existentes:
+                cur.execute(
+                    f'INSERT INTO {schema}.grupos_articulos (id_grupo_articulo, descripcion) '
+                    f'VALUES (%s, %s)',
+                    (gid, gdesc)
+                )
+                insertados += 1
+
+        if insertados > 0:
+            pg_conn.commit()
+            logger.log(f'  [MASTERS] grupos_articulos: {insertados} registros sintéticos insertados (-1, -2)')
+        else:
+            logger.log(f'  [MASTERS] grupos_articulos: registros sintéticos -1, -2 ya existentes')
+    except Exception:
+        pg_conn.rollback()
+        raise
+    finally:
+        cur.close()
 
 
 # ---------------------------------------------------------------------------
@@ -994,7 +1058,7 @@ def _fix_id_caja(id_cierre, schema, sql_conn, pg_conn, logger):
             (sql_row[0], id_cierre)
         )
         pg_conn.commit()
-        logger.log(f'  [FIX id_caja] {id_cierre}: corregido → id_caja = {sql_row[0]}')
+        logger.log(f'  [FIX id_caja] {id_cierre}: corregido -> id_caja = {sql_row[0]}')
     except Exception as e:
         pg_conn.rollback()
         logger.log(f'  [FIX id_caja] {id_cierre}: ERROR — {e}')
@@ -1038,6 +1102,7 @@ def process_id(id_cierre, schema, pool, logger):
     sql_conn, pg_conn = pool.acquire()
     try:
         _fix_id_caja(id_cierre, schema, sql_conn, pg_conn, logger)
+        _set_fecha_importacion(id_cierre, schema, pg_conn, logger)
     finally:
         pool.release(sql_conn, pg_conn)
 
@@ -1064,28 +1129,144 @@ def get_cierres(fecha_desde, fecha_hasta, sql_db, id_estacion):
     return rows
 
 # ---------------------------------------------------------------------------
+# fecha_importacion en cierre_turno_encabezado: no viene del SP, se agrega
+# aparte. Registra cuando NOSOTROS importamos cada cierre (no el LastUpdated
+# de origen), para poder detectar modificaciones comparando contra el
+# LastUpdated actual de SQL Server sin depender de ningun watermark global.
+# ---------------------------------------------------------------------------
+def _ensure_fecha_importacion_column(pg_conn, schema):
+    cur = pg_conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = 'cierre_turno_encabezado'",
+        (schema,)
+    )
+    if cur.fetchone():
+        cur.execute(
+            f'ALTER TABLE {schema}.cierre_turno_encabezado '
+            f'ADD COLUMN IF NOT EXISTS fecha_importacion TIMESTAMP'
+        )
+        pg_conn.commit()
+    cur.close()
+
+def _set_fecha_importacion(id_cierre, schema, pg_conn, logger):
+    cur_pg = pg_conn.cursor()
+    try:
+        cur_pg.execute(
+            f'UPDATE {schema}.cierre_turno_encabezado '
+            f'SET fecha_importacion = NOW() WHERE id_cierre_turno = %s',
+            (id_cierre,)
+        )
+        pg_conn.commit()
+    except Exception as e:
+        pg_conn.rollback()
+        logger.log(f'  [FIX fecha_importacion] {id_cierre}: ERROR — {e}')
+    finally:
+        cur_pg.close()
+
+# ---------------------------------------------------------------------------
+# Modo incremental: nuevos y modificados se detectan con criterios distintos.
+#
+# Nuevos: IdCierreTurno mayor al maximo ya importado en PG. Los IDs son
+# secuenciales (identity), asi que cualquier cierre creado despues de la
+# ultima corrida tiene un ID mas alto que todo lo que ya tenemos — no hace
+# falta ventana de fecha ni traer el historico completo.
+#
+# Modificados: de los que YA estan en PG, se acota a los ultimos
+# VENTANA_DIAS_INCREMENTAL dias (por Fecha del cierre) y se compara el
+# LastUpdated actual en SQL Server contra la fecha_importacion registrada en
+# PG. Como este proceso corre varias veces al dia, es muy improbable que un
+# cierre pase mas de esa ventana sin recibir su version final — un backfill
+# historico real se hace aparte con "etl.py <desde> <hasta>".
+# ---------------------------------------------------------------------------
+VENTANA_DIAS_INCREMENTAL = 7
+
+def get_cierres_incremental(sql_db, id_estacion, pg_conn, schema):
+    pg_estado = {}
+    pg_cols = _get_pg_cols(pg_conn, schema, 'cierre_turno_encabezado')
+    if pg_cols:
+        cur_pg = pg_conn.cursor()
+        cur_pg.execute(
+            f'SELECT id_cierre_turno, fecha_importacion '
+            f'FROM {schema}.cierre_turno_encabezado'
+        )
+        pg_estado = {r[0]: r[1] for r in cur_pg.fetchall()}
+        cur_pg.close()
+
+    max_id = max(pg_estado) if pg_estado else None
+
+    conn = _connect_sql(sql_db)
+    cur  = conn.cursor()
+
+    # ── Nuevos: por ID, sin importar la fecha ──
+    if max_id is not None:
+        cur.execute(
+            'SELECT ct.IdCierreTurno, ct.Fecha, ct.Numero '
+            'FROM CierresTurno ct JOIN Cajas c ON c.IdCaja = ct.IdCaja '
+            'WHERE c.IdEstacion = ? AND ct.IdCierreTurno > ? '
+            'ORDER BY ct.Fecha ASC',
+            (id_estacion, max_id)
+        )
+    else:
+        cur.execute(
+            'SELECT ct.IdCierreTurno, ct.Fecha, ct.Numero '
+            'FROM CierresTurno ct JOIN Cajas c ON c.IdCaja = ct.IdCaja '
+            'WHERE c.IdEstacion = ? '
+            'ORDER BY ct.Fecha ASC',
+            (id_estacion,)
+        )
+    faltantes = cur.fetchall()
+
+    # ── Modificados: ventana de dias + fecha_importacion ──
+    modificados = []
+    if pg_estado:
+        corte = datetime.now() - _dt.timedelta(days=VENTANA_DIAS_INCREMENTAL)
+        cur.execute(
+            'SELECT ct.IdCierreTurno, ct.Fecha, ct.Numero, ct.LastUpdated '
+            'FROM CierresTurno ct JOIN Cajas c ON c.IdCaja = ct.IdCaja '
+            'WHERE c.IdEstacion = ? AND ct.Fecha >= ? '
+            'ORDER BY ct.Fecha ASC',
+            (id_estacion, corte)
+        )
+        for row in cur.fetchall():
+            id_cierre, _fecha, _numero, last_updated = row
+            if id_cierre in pg_estado and last_updated is not None and (
+                    pg_estado[id_cierre] is None or last_updated > pg_estado[id_cierre]):
+                modificados.append(row)
+
+    cur.close()
+    conn.close()
+
+    return faltantes, modificados
+
+# ---------------------------------------------------------------------------
 # Main — itera los grupos solicitados en secuencia
 # ---------------------------------------------------------------------------
 def main():
     ts_inicio = datetime.now()
     stamp     = ts_inicio.strftime('%Y%m%d_%H%M%S')
 
-    _init_conn = psycopg2.connect(
-        host=PG_HOST, database=PG_DB, user=PG_USER, password=PG_PASS, port=PG_PORT
-    )
-    _cur = _init_conn.cursor()
-    _cur.execute(f'CREATE SCHEMA IF NOT EXISTS {SCHEMA}')
-    _init_conn.commit()
-    _cur.close()
-    _init_conn.close()
-
     log_exec_path = os.path.join(LOGS_EXEC_DIR, f'ejecucion_{stamp}.txt')
     log_ids_path  = os.path.join(LOGS_IDS_DIR,  f'ids_{stamp}.txt')
     logger = Logger(log_exec_path)
+    pg_tunnel.configurar_logging(logger.log)
+
+    try:
+        _init_conn = pg_tunnel.conectar_pg(SCHEMA)
+        _ensure_fecha_importacion_column(_init_conn, SCHEMA)
+        _init_conn.close()
+    except Exception as e:
+        logger.log(f'ERROR al conectar con PostgreSQL (tunel): {e}')
+        pg_tunnel.cerrar_tunel()
+        logger.close()
+        sys.exit(1)
 
     logger.log('=' * 60)
     logger.log('INICIO ETL v8 - Cierres de Turno')
-    logger.log(f'Rango      : {FECHA_DESDE} a {FECHA_HASTA}')
+    if MODO_INCREMENTAL:
+        logger.log('Modo       : incremental (faltantes + modificados)')
+    else:
+        logger.log(f'Rango      : {FECHA_DESDE} a {FECHA_HASTA}')
     logger.log(f'Estacion   : {ID_ESTACION} | BD SQL Server: {SQL_DB} | Schema PG: {SCHEMA}')
     logger.log(f'Workers    : {MAX_WORKERS} modulos en paralelo por ID')
     logger.log(f'Inicio     : {ts_inicio.strftime("%Y-%m-%d %H:%M:%S")}')
@@ -1093,9 +1274,18 @@ def main():
 
     logger.log('Consultando IDs en SQL Server...')
     try:
-        cierres = get_cierres(FECHA_DESDE, FECHA_HASTA, SQL_DB, ID_ESTACION)
+        if MODO_INCREMENTAL:
+            _pg_check = pg_tunnel.conectar_pg()
+            faltantes, modificados = get_cierres_incremental(SQL_DB, ID_ESTACION, _pg_check, SCHEMA)
+            _pg_check.close()
+            logger.log(f'  Faltantes  : {len(faltantes)}')
+            logger.log(f'  Modificados: {len(modificados)}')
+            cierres = faltantes + modificados
+        else:
+            cierres = get_cierres(FECHA_DESDE, FECHA_HASTA, SQL_DB, ID_ESTACION)
     except Exception as e:
         logger.log(f'ERROR al consultar CierresTurno: {e}')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
 
@@ -1103,7 +1293,10 @@ def main():
 
     with open(log_ids_path, 'w', encoding='utf-8') as fids:
         fids.write(f'Extraccion : {ts_inicio.strftime("%Y-%m-%d %H:%M:%S")}\n')
-        fids.write(f'Rango      : {FECHA_DESDE} a {FECHA_HASTA}\n')
+        if MODO_INCREMENTAL:
+            fids.write('Modo       : incremental (faltantes + modificados)\n')
+        else:
+            fids.write(f'Rango      : {FECHA_DESDE} a {FECHA_HASTA}\n')
         fids.write(f'Estacion   : {ID_ESTACION} | {SQL_DB}\n')
         fids.write(f'Total      : {len(cierres)} cierres\n')
         fids.write('-' * 50 + '\n')
@@ -1115,16 +1308,14 @@ def main():
 
     if not cierres:
         logger.log('No hay cierres para procesar.')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(0)
 
     # ── FASE 0: Sincronizar tablas maestras antes de procesar cierres ──
     try:
         _sql_master = _connect_sql(SQL_DB)
-        _pg_master  = psycopg2.connect(
-            host=PG_HOST, database=PG_DB, user=PG_USER,
-            password=PG_PASS, port=PG_PORT
-        )
+        _pg_master  = pg_tunnel.conectar_pg()
         sync_all_masters(_sql_master, _pg_master, SCHEMA, logger)
         _sql_master.close()
         _pg_master.close()
@@ -1136,6 +1327,7 @@ def main():
         pool = ConnectionPool(MAX_WORKERS, SQL_DB, SCHEMA)
     except Exception as e:
         logger.log(f'ERROR al inicializar pool de conexiones: {e}')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
 
@@ -1160,6 +1352,7 @@ def main():
             err_count += 1
 
     pool.close_all()
+    pg_tunnel.cerrar_tunel()
 
     duracion_total = (datetime.now() - ts_inicio).total_seconds()
     logger.log()

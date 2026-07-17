@@ -2,6 +2,9 @@
 .env
 .env.*
 
+# Llave SSH del tunel
+llave_remota
+
 # Entorno virtual
 venv/
 .venv/

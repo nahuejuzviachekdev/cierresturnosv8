@@ -30,6 +30,8 @@ if os.path.exists(_ENV_PATH):
                 _k, _v = _line.split('=', 1)
                 os.environ[_k.strip()] = _v.strip()
 
+import pg_tunnel
+
 # ---------------------------------------------------------------------------
 # Argumentos
 # ---------------------------------------------------------------------------
@@ -49,11 +51,6 @@ MAX_WORKERS = 5
 # ---------------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------------
-PG_HOST  = os.getenv('HOST')
-PG_DB    = os.getenv('DATABASE')
-PG_USER  = os.getenv('USERNAME')
-PG_PASS  = os.getenv('PASSWORD')
-PG_PORT  = os.getenv('PORT_1', '5432')
 SQL_HOST = os.getenv('SQLSERVER_HOST_1')
 SQL_USER = os.getenv('SQLSERVER_USER_1')
 SQL_PASS = os.getenv('SQLSERVER_PASSWORD_1')
@@ -134,15 +131,7 @@ def _connect_sql():
     return conn
 
 def _connect_pg():
-    conn = psycopg2.connect(
-        host=PG_HOST, database=PG_DB, user=PG_USER,
-        password=PG_PASS, port=PG_PORT
-    )
-    cur = conn.cursor()
-    cur.execute(f'CREATE SCHEMA IF NOT EXISTS {SCHEMA}')
-    conn.commit()
-    cur.close()
-    return conn
+    return pg_tunnel.conectar_pg(SCHEMA)
 
 # ---------------------------------------------------------------------------
 # Tipos
@@ -280,6 +269,8 @@ _MASTER_TABLES = [
     ('Empleados',         'empleados',          'id_empleado',         False),
     ('Bancos',            'bancos',             'id_banco',            False),
     ('Clientes',          'Clientes',           'IdCliente',           True),
+    ('TiposMovimiento',   'tipos_movimientos',  'id_tipo_movimiento',  False),
+    ('TarjetasCredito',   'tarjetas_credito',   'id_tarjeta',         False),
 ]
 
 def _sync_master_table(sql_conn, pg_conn, sql_table, pg_table, pk_col, preserve_case=False):
@@ -300,6 +291,29 @@ def _sync_master_table(sql_conn, pg_conn, sql_table, pg_table, pk_col, preserve_
 
     # Auto-filtrar a columnas que existen en PG
     pg_existing = _get_pg_cols(pg_conn, pg_table)
+
+    # DDL: crear tabla si no existe
+    if not pg_existing:
+        def q(name):
+            return f'"{name}"' if preserve_case else name
+        col_defs = []
+        for col_name, r in zip(col_names, rows[0]):
+            pg_type = get_pg_type(type(r))
+            col_snake = col_name if preserve_case else to_snake(col_name)
+            inline_pk = ' PRIMARY KEY' if col_snake == pk_col else ''
+            col_defs.append(f'{q(col_snake)} {pg_type}{inline_pk}')
+        full_table = f'{SCHEMA}."{pg_table}"' if preserve_case else f'{SCHEMA}.{pg_table}'
+        cur_ddl = pg_conn.cursor()
+        try:
+            cur_ddl.execute(f'CREATE TABLE IF NOT EXISTS {full_table} ({", ".join(col_defs)})')
+            pg_conn.commit()
+            _pg_cols_cache[f'{SCHEMA}.{pg_table}'] = set(pg_cols)
+            pg_existing = set(pg_cols)
+        except Exception:
+            pg_conn.rollback()
+        finally:
+            cur_ddl.close()
+
     keep_idx    = [i for i, sc in enumerate(pg_cols) if sc in pg_existing]
     if not keep_idx:
         return 0
@@ -348,9 +362,58 @@ def sync_all_masters(sql_conn, pg_conn, logger):
             logger.log(f'  [Maestros] {pg_table}: {count} filas')
         except Exception as e:
             logger.log(f'  [Maestros] {pg_table}: ERROR — {e}')
+    _ensure_grupos_sinteticos(pg_conn, logger)
     # Invalidar caches de lookups para que usen datos frescos
     _cajas_lkp_cache.pop(SCHEMA, None)
     _bancos_lkp_cache.pop(SCHEMA, None)
+
+
+def _ensure_grupos_sinteticos(pg_conn, logger):
+    """Asegura la existencia de la tabla grupos_articulos y de los IDs
+    sintéticos (-1, -2) que los SPs de SQL Server generan hardcodeados
+    para percepciones. Seguro para base de datos limpia."""
+    dummy_grupos = [
+        (-1, 'PERCEPCIONES (CONTADO)'),
+        (-2, 'PERCEPCIONES (CTA.CTE.)'),
+    ]
+    cur = pg_conn.cursor()
+    try:
+        # Crear la tabla si no existe (base limpia)
+        cur.execute(f'''
+            CREATE TABLE IF NOT EXISTS {SCHEMA}.grupos_articulos (
+                id_grupo_articulo BIGINT PRIMARY KEY,
+                descripcion TEXT
+            )
+        ''')
+        pg_conn.commit()
+
+        # Verificar qué registros faltan
+        cur.execute(
+            f'SELECT id_grupo_articulo FROM {SCHEMA}.grupos_articulos '
+            f'WHERE id_grupo_articulo IN (-1, -2)'
+        )
+        existentes = {r[0] for r in cur.fetchall()}
+
+        insertados = 0
+        for gid, gdesc in dummy_grupos:
+            if gid not in existentes:
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.grupos_articulos (id_grupo_articulo, descripcion) '
+                    f'VALUES (%s, %s)',
+                    (gid, gdesc)
+                )
+                insertados += 1
+
+        if insertados > 0:
+            pg_conn.commit()
+            logger.log(f'  [Maestros] grupos_articulos: {insertados} registros sintéticos insertados (-1, -2)')
+        else:
+            logger.log(f'  [Maestros] grupos_articulos: registros sintéticos -1, -2 ya existentes')
+    except Exception:
+        pg_conn.rollback()
+        raise
+    finally:
+        cur.close()
 
 # ---------------------------------------------------------------------------
 # sync_table
@@ -818,6 +881,41 @@ def run_module(mod, id_cierre, sql_conn, pg_conn):
 
 
 # ---------------------------------------------------------------------------
+# fecha_importacion en cierre_turno_encabezado: no viene del SP, se agrega
+# aparte. Registra cuando NOSOTROS importamos el cierre, para que el modo
+# incremental de etl.py no lo trate como "modificado" en la proxima corrida.
+# ---------------------------------------------------------------------------
+def _ensure_fecha_importacion_column(pg_conn):
+    cur = pg_conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = %s AND table_name = 'cierre_turno_encabezado'",
+        (SCHEMA,)
+    )
+    if cur.fetchone():
+        cur.execute(
+            f'ALTER TABLE {SCHEMA}.cierre_turno_encabezado '
+            f'ADD COLUMN IF NOT EXISTS fecha_importacion TIMESTAMP'
+        )
+        pg_conn.commit()
+    cur.close()
+
+def _set_fecha_importacion(id_cierre, pg_conn, logger):
+    cur_pg = pg_conn.cursor()
+    try:
+        cur_pg.execute(
+            f'UPDATE {SCHEMA}.cierre_turno_encabezado '
+            f'SET fecha_importacion = NOW() WHERE id_cierre_turno = %s',
+            (id_cierre,)
+        )
+        pg_conn.commit()
+    except Exception as e:
+        pg_conn.rollback()
+        logger.log(f'  [FIX fecha_importacion] {id_cierre}: ERROR — {e}')
+    finally:
+        cur_pg.close()
+
+# ---------------------------------------------------------------------------
 # Fallback de id_caja: consulta CierresTurno en SQL Server si quedó NULL en PG
 # ---------------------------------------------------------------------------
 def _fix_id_caja(id_cierre, sql_conn, pg_conn, logger):
@@ -842,7 +940,7 @@ def _fix_id_caja(id_cierre, sql_conn, pg_conn, logger):
             (sql_row[0], id_cierre)
         )
         pg_conn.commit()
-        logger.log(f'  [FIX id_caja] {id_cierre}: corregido → id_caja = {sql_row[0]}')
+        logger.log(f'  [FIX id_caja] {id_cierre}: corregido -> id_caja = {sql_row[0]}')
     except Exception as e:
         pg_conn.rollback()
         logger.log(f'  [FIX id_caja] {id_cierre}: ERROR — {e}')
@@ -884,6 +982,7 @@ def process_id(id_cierre, pool, logger):
     sql_conn, pg_conn = pool.acquire()
     try:
         _fix_id_caja(id_cierre, sql_conn, pg_conn, logger)
+        _set_fecha_importacion(id_cierre, pg_conn, logger)
     finally:
         pool.release(sql_conn, pg_conn)
 
@@ -899,6 +998,7 @@ def main():
     log_exec_path = os.path.join(LOGS_EXEC_DIR, f'ejecucion_{stamp}_id{ID_CIERRE}.txt')
     log_ids_path  = os.path.join(LOGS_IDS_DIR,  f'ids_{stamp}_id{ID_CIERRE}.txt')
     logger = Logger(log_exec_path)
+    pg_tunnel.configurar_logging(logger.log)
 
     logger.log('=' * 60)
     logger.log('INICIO ETL v5 - Cierre por ID')
@@ -924,11 +1024,13 @@ def main():
         conn_check.close()
     except Exception as e:
         logger.log(f'ERROR al consultar SQL Server: {e}')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
 
     if not row:
         logger.log(f'ERROR: No se encontro el IdCierreTurno {ID_CIERRE} en {SQL_DB} para la estacion {ID_ESTACION}.')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
 
@@ -948,10 +1050,7 @@ def main():
     logger.log('FASE 0: Sincronizando tablas maestras...')
     try:
         _sql_master = _connect_sql()
-        _pg_master  = psycopg2.connect(
-            host=PG_HOST, database=PG_DB, user=PG_USER,
-            password=PG_PASS, port=PG_PORT
-        )
+        _pg_master  = pg_tunnel.conectar_pg()
         sync_all_masters(_sql_master, _pg_master, logger)
         _sql_master.close()
         _pg_master.close()
@@ -963,8 +1062,13 @@ def main():
         pool = ConnectionPool(MAX_WORKERS)
     except Exception as e:
         logger.log(f'ERROR al inicializar pool de conexiones: {e}')
+        pg_tunnel.cerrar_tunel()
         logger.close()
         sys.exit(1)
+
+    _pg_ddl = _connect_pg()
+    _ensure_fecha_importacion_column(_pg_ddl)
+    _pg_ddl.close()
 
     logger.log()
     logger.log(f'--- Procesando IdCierreTurno: {ID_CIERRE} | Fecha: {fecha_c} ---')
@@ -974,6 +1078,7 @@ def main():
 
     duracion = (datetime.now() - t0).total_seconds()
     pool.close_all()
+    pg_tunnel.cerrar_tunel()
 
     logger.log()
     logger.log('=' * 60)
