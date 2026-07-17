@@ -17,6 +17,8 @@ import pyodbc
 import psycopg2
 from psycopg2 import extras
 
+# El Python portable (embeddable) no agrega la carpeta del script a sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_tunnel
 
 # ---------------------------------------------------------------------------

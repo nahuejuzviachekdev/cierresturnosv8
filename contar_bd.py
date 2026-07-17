@@ -1,7 +1,10 @@
 import os
+import sys
 from datetime import datetime
 from dotenv import load_dotenv
 
+# El Python portable (embeddable) no agrega la carpeta del script a sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_tunnel
 
 load_dotenv(override=True)

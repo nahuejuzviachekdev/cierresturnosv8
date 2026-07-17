@@ -30,6 +30,8 @@ if os.path.exists(_ENV_PATH):
                 _k, _v = _line.split('=', 1)
                 os.environ[_k.strip()] = _v.strip()
 
+# El Python portable (embeddable) no agrega la carpeta del script a sys.path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_tunnel
 
 # ---------------------------------------------------------------------------
