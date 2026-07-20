@@ -1,0 +1,31 @@
+#SQL Server Proveedor
+SQLSERVER_HOST_1=
+SQLSERVER_PORT_1=
+SQLSERVER_USER_1=
+SQLSERVER_PASSWORD_1=
+SQLSERVER_ENCRYPT_1=
+SQLSERVER_DB=
+IDEstacion=
+
+# PostgreSQL Destino (tal como se ve DESDE el servidor destino -- normalmente 127.0.0.1 --
+# ya que la conexion real llega por el tunel SSH, ver seccion TUNEL mas abajo)
+HOST=.0.0.1
+DATABASE=
+USERNAME=
+PASSWORD=
+PORT_1=
+SCHEMA=
+
+# Tunel SSH hacia el Postgres destino (2 saltos: VPS -> servidor con Postgres)
+TUNNEL_VPS_HOST=
+TUNNEL_VPS_PORT=
+TUNNEL_VPS_USER=
+TUNNEL_LOCAL_USER=
+TUNNEL_REMOTE_PORT=
+TUNNEL_KEY_FILE=
+TUNNEL_MAX_INTENTOS=
+TUNNEL_ESPERA_REINTENTO=
+TUNNEL_TIMEOUT=
+
+# Python Portable (ruta al interprete python.exe, solo se usa si no hay Python en el PATH del sistema)
+PYTHON_PATH=C:\ruta\a\python_portable\python.exe

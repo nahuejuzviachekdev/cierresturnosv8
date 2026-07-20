@@ -118,12 +118,21 @@ Los 21 módulos de un mismo `IdCierreTurno` se ejecutan **en paralelo** con `Thr
 2. **Auto-filtro de columnas**: solo inserta las columnas que ya existen en la tabla PG destino (las columnas de texto descriptivo que se agregaron/quitaron con el tiempo se descartan silenciosamente).
 3. **Creación de tabla bajo demanda**: `CREATE TABLE IF NOT EXISTS` con tipos inferidos del tipo real devuelto por pyodbc (`bool→BOOLEAN`, `int→BIGINT`, `Decimal→NUMERIC(18,8)`, `datetime→TIMESTAMP`, etc.).
 4. **Upsert real**: `INSERT ... ON CONFLICT (pk) DO UPDATE SET ...` — reprocesar un cierre ya existente sobrescribe sus filas, no las duplica.
-5. **Derivaciones**: algunos módulos no traen `id_caja` directo, se deriva de un patrón de texto (`"(123)- NOMBRE CAJA"`) o de un lookup por nombre contra la tabla `cajas`; análogo para `id_banco`.
+5. **Derivaciones**: algunos módulos no traen `id_caja` directo, se deriva de un patrón de texto (`"(123)- NOMBRE CAJA"`) — con fallback a lookup por nombre contra la tabla `cajas` si el patrón no matchea (ver 6.2b); análogo para `id_banco`.
 6. **Inyección de `id_cierre_turno`**: algunos SPs no devuelven ese campo en cada fila — se agrega manualmente (`inject_id`).
 
-### 6.2 Fallback de `id_caja`
+### 6.2 Fallback de `id_caja` en `cierre_turno_encabezado`
 
-Si el módulo 001 deja `id_caja` en `NULL` (pasa quando el patrón de descripción no matchea), `_fix_id_caja()` hace una consulta directa a `CierresTurno.IdCaja` en SQL Server y completa el dato en PG después de correr los módulos.
+Si el módulo 001 deja `id_caja` en `NULL` (pasa cuando el patrón de descripción no matchea), `_fix_id_caja()` hace una consulta directa a `CierresTurno.IdCaja` en SQL Server y completa el dato en PG después de correr los módulos. **Este fallback es exclusivo de `cierre_turno_encabezado`** — no aplica a ninguna otra tabla.
+
+### 6.2b Derivación de `id_caja` en `cierre_turno_tanques_detalle` (bug corregido)
+
+El módulo 003 (`Listado_EstadoTanques`) trae un campo `DescripcionCaja` que originalmente se resolvía a `id_caja` con un **lookup por nombre exacto** contra `cajas.descripcion` (mayúsculas, `.strip()`). Ese lookup fallaba sistemáticamente: `DescripcionCaja` viene con el mismo formato `"(NNN)- NOMBRE"` que ya usa `cierre_turno_encabezado` (ej. `"(14)- A. DEL VALLE CTRO - PLAYA"`), mientras que `cajas.descripcion` guarda el nombre limpio, sin el prefijo (`"A. DEL VALLE CTRO - PLAYA"`) — nunca coincidían como string exacto, y `id_caja` quedaba `NULL` en todas las filas de esa tabla (confirmado en producción con el cierre `912995`, estación 4, `AdelValleCentro`).
+
+**Fix:** ahora se intenta primero extraer el ID directo del prefijo `"(NNN)- "` con la misma regex que usa `cierre_turno_encabezado`; solo si `descripcion_caja` no trae ese prefijo, cae al lookup por nombre contra `cajas` como fallback. Aplicado en `sync_table()` de `etl.py` y `etl_id.py` (duplicado en ambos, igual que el resto del mecanismo).
+
+- No hay fallback posterior tipo `_fix_id_caja()` para esta tabla — si `DescripcionCaja` viniera sin el prefijo `(NNN)-` y el nombre tampoco matcheara contra `cajas` (typo, estación con formato distinto), `id_caja` seguiría quedando `NULL` sin aviso más allá del log de la corrida.
+- Para verificar el fix en un cierre ya importado con `id_caja` en `NULL`: reprocesarlo con `etl_id.py <id>` (upsert, sobrescribe las filas existentes).
 
 ### 6.3 Módulo 018 — reemplazo de SP por query directa
 
@@ -247,7 +256,8 @@ ejecucion_diaria.bat
        ├─ Por cada cierre (nuevo o modificado), en el pool de 5 workers:
        │    ├─ Corre los 21 modulos en paralelo (SPs o queries directas)
        │    ├─ sync_table(): upsert en las tablas PG correspondientes
-       │    ├─ _fix_id_caja(): completa id_caja si quedo NULL
+       │    │    └─ deriva id_caja / id_banco donde corresponda (ver 6.2b)
+       │    ├─ _fix_id_caja(): completa id_caja en cierre_turno_encabezado si quedo NULL
        │    └─ _set_fecha_importacion(): UPDATE fecha_importacion = NOW()
        └─ Log de resumen (OK / errores / duracion) en logs_ejecuciones/
 ```
@@ -272,7 +282,7 @@ El VPS y el servidor destino no se tocan: Postgres nunca sale de su loopback en 
 
 ### 14.2 Módulo `pg_tunnel.py`
 
-Es un módulo compartido (no un script standalone) importado por `etl.py`, `etl_id.py`, los `*_maestros.py` y `contar_bd.py`. Expone tres funciones:
+Es un módulo compartido (no un script standalone) importado por `etl.py`, `etl_id.py`, los `*_maestros.py`, `contar_bd.py` y `probar_tunnel.py`. Expone tres funciones:
 
 - **`abrir_tunel()`**: abre el túnel (jump SSH al VPS + `SSHTunnelForwarder` al servidor destino) si todavía no está activo en el proceso, y devuelve el puerto local efímero. Reintenta hasta `TUNNEL_MAX_INTENTOS` veces, con `TUNNEL_ESPERA_REINTENTO` segundos entre intentos. Si ya hay un túnel activo (`forwarder.is_active`), lo reutiliza en vez de abrir uno nuevo — así el pool de 5 conexiones de `etl.py`/`etl_id.py` comparte un solo túnel, multiplexado por `sshtunnel`.
 - **`conectar_pg(schema=None)`**: abre el túnel si hace falta y devuelve una conexión `psycopg2` sobre `127.0.0.1:<puerto_local>`. Si se pasa `schema`, ejecuta `CREATE SCHEMA IF NOT EXISTS` antes de devolver la conexión (reemplaza lo que antes hacía cada script a mano).
@@ -292,6 +302,19 @@ Es un módulo compartido (no un script standalone) importado por `etl.py`, `etl_
 
 La llave privada (`llave_remota`, referenciada por `TUNNEL_KEY_FILE`) vive junto al proyecto pero está excluida en `.gitignore` — nunca se commitea, igual que `.env`.
 
+### 14.3b `sys.path` con Python portable (bug corregido)
+
+El Python portable/embeddable (`PYTHON_PATH` en `.env`) **no agrega automáticamente la carpeta del script a `sys.path`** — a diferencia de un Python de sistema normal. Si el `.bat` cae al portable (porque no hay `python` en el `PATH` del servidor), `import pg_tunnel` fallaba con `ModuleNotFoundError` aunque `pg_tunnel.py` estuviera en la misma carpeta que el script (confirmado en producción, servidor `C:\bots\cierresturnosv8\`).
+
+**Fix:** todos los scripts que importan `pg_tunnel` (`etl.py`, `etl_id.py`, los `*_maestros.py`, `contar_bd.py`, `probar_tunnel.py`) agregan su propia carpeta a `sys.path` justo antes del import:
+
+```python
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pg_tunnel
+```
+
+Mismo patrón que ya usaba el proyecto de referencia del túnel (`EtlPostgres`) para el mismo problema.
+
 ### 14.4 Logging del túnel
 
 `pg_tunnel.configurar_logging(log_fn)` redirige los logs internos de `paramiko`, `sshtunnel` y del propio `pg_tunnel` hacia la función de log del script que lo llama (con prefijo `[tunel]`), para que todo el proceso de conexión (apertura de saltos SSH, forwarder, reintentos) quede en el mismo archivo de log de la corrida (`logs_ejecuciones/...`), no en un log aparte.
@@ -303,3 +326,7 @@ La llave privada (`llave_remota`, referenciada por `TUNNEL_KEY_FILE`) vive junto
 ### 14.6 Dependencias
 
 `paramiko`, `sshtunnel` y `python-dotenv` (este último solo lo usa `contar_bd.py`), sumadas a `pyodbc`/`psycopg2-binary` que ya existían — todas en `requirements.txt`.
+
+### 14.7 Estado verificado
+
+Conectividad probada en vivo contra el destino real: túnel VPS (`sistema.petrovalle.com.ar`) → servidor con Postgres → `AdelValleCentro`, Postgres 15.17, schema `petrovalle` con 51 tablas. `probar_tunnel.bat` y la Fase 0 de maestros (`cajas` sincronizada, 4 filas para la estación 4) confirmados funcionando end-to-end.
